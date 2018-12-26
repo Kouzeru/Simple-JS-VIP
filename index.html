@@ -1,0 +1,443 @@
+<html>
+	<head><title>Simple JS-VIP</title></head>
+	<body>
+		<div class="beep" style="background-color:black;width:480;height:360;padding:8px;border:2px solid grey" >
+		<div style="margin-left:16px;margin-top:52px">
+		<canvas id="target" width="64" height="128" style="background-color:black"></canvas></div></div>
+		<style>#target{transform:scale(7,2);image-rendering:pixelated;transform-origin:top left;}
+		body{font-family:consolas}</style>
+		<div>Q: <div style="display:inline-block;width:12px;height:12px;top:4px;left:4px;background-color:white"
+		class="beep"></div></div>
+		<br><div><table><tr><td>Load address</td><td>:</td>
+		<td><input id="loadaddr" type="text" value="0200" size="4" onchange="inputcheck()" maxlength="4"></input>
+		</td><td><button id="load" type="button" onmouseup="pressload()">Load to memory</button></td>
+		<td><button id="reset" type="button" onmouseup="reset()">Start Emulation</button></td></tr></table></div>
+		<br><br><div style="color:black;background-color:white"id="pcn"></div>
+		<input type="file" id="inputfile" accept='.bin' onchange="load()" style="display:none"></input>
+	</body>
+	<script name="VIP">
+		var M   = new Uint8Array(0x10000)
+		var Cv  = new Uint8Array(0x400)
+		var R   = new Uint16Array(0x10)
+		IOV = new Uint8Array(0x8)
+		IOS = new Uint8Array(0x8)
+		var Q   = 0 //Output Flip-Flop
+		var D   = 8 //Data Register
+		var DF  = 0 //Data Flag
+		var E1  = 0 //User Flag 1
+		var E2  = 0 //User Flag 2
+		var E3  = 0 //User Flag 3
+		var E4  = 0 //User Flag 4
+		var ID  = 0 //Idle state
+		var IE  = 1 //Interrupt Enable
+		var T   = 0 //X,P Pointer Holder
+		var X   = 2 //Data-Index Pointer
+		var P   = 2 //Program-Counter Pointer
+		var N   = 0 //Low-Order Instruction
+		var I   = 0 //High-Order Instruction
+		var C   = 12 //Number of cycles
+		var nC  = 12 //Cycles target
+		R[P]    = 0x8008
+		
+		
+		var K   = {} //VIP keypressed
+
+		var ops = [
+/*       0        1        2        3        4        5        6        7        8        9        a        b        c        d        e        f */
+/* 0 */	"IDL   ","LDN R1","LDN R2","LDN R3","LDN R4","LDN R5","LDN R6","LDN R7","LDN R8","LDN R9","LDN RA","LDN RB","LDN RC","LDN RD","LDN RE","LDN RF",
+/* 1 */	"INC R0","INC R1","INC R2","INC R3","INC R4","INC R5","INC R6","INC R7","INC R8","INC R9","INC RA","INC RB","INC RC","INC RD","INC RE","INC RF",
+/* 2 */	"DEC 0R","DEC R1","DEC R2","DEC R3","DEC R4","DEC R5","DEC R6","DEC R7","DEC R8","DEC R9","DEC RA","DEC RB","DEC RC","DEC RD","DEC RE","DEC RF",
+/* 3 */	"BR    ","BQ    ","BZ    ","BDF   ","B1    ","B2    ","B3    ","B4    ","SKP   ","BNQ   ","BNZ   ","BNF   ","BN1   ","BN2   ","BN3   ","BN4   ",
+/* 4 */	"LDA R0","LDA R1","LDA R2","LDA R3","LDA R4","LDA R5","LDA R6","LDA R7","LDA R8","LDA R9","LDA RA","LDA RB","LDA RC","LDA RD","LDA RE","LDA RF",
+/* 5 */	"STR R0","STR R1","STR R2","STR R3","STR R4","STR R5","STR R6","STR R7","STR R8","STR R9","STR RA","STR RB","STR RC","STR RD","STR RE","STR RF",
+/* 6 */	"IRX   ","OUT 1 ","OUT 2 ","OUT 3 ","OUT 4 ","OUT 5 ","OUT 6 ","OUT 7 ","$68   ","INP 1 ","INP 2 ","INP 3 ","INP 4 ","INP 5 ","INP 6 ","INP 7 ",
+/* 7 */	"RET   ","DIS   ","LDXA  ","STXD  ","ADC   ","SDB   ","SHRC  ","SMB   ","SAV   ","MARK  ","REQ   ","SEQ   ","ADCI  ","SDBI  ","SHLC  ","SMBI  ",
+/* 8 */	"GLO R0","GLO R1","GLO R2","GLO R3","GLO R4","GLO R5","GLO R6","GLO R7","GLO R8","GLO R9","GLO RA","GLO RB","GLO RC","GLO RD","GLO RE","GLO RF",
+/* 9 */	"GHI R0","GHI R1","GHI R2","GHI R3","GHI R4","GHI R5","GHI R6","GHI R7","GHI R8","GHI R9","GHI RA","GHI RB","GHI RC","GHI RD","GHI RE","GHI RF",
+/* a */	"PLO R0","PLO R1","PLO R2","PLO R3","PLO R4","PLO R5","PLO R6","PLO R7","PLO R8","PLO R9","PLO RA","PLO RB","PLO RC","PLO RD","PLO RE","PLO RF",
+/* b */	"PHI R0","PHI R1","PHI R2","PHI R3","PHI R4","PHI R5","PHI R6","PHI R7","PHI R8","PHI R9","PHI RA","PHI RB","PHI RC","PHI RD","PHI RE","PHI RF",
+/* c */	"LBR   ","LBQ   ","LBZ   ","LBDF  ","NOP   ","LSNQ  ","LSNZ  ","LSNF  ","LSKP  ","LBNQ  ","LBNZ  ","LBNF  ","LSIE  ","LSQ   ","LSZ   ","LSDF  ",
+/* d */	"SEP R0","SEP R1","SEP R2","SEP R3","SEP R4","SEP R5","SEP R6","SEP R7","SEP R8","SEP R9","SEP RA","SEP RB","SEP RC","SEP RD","SEP RE","SEP RF",
+/* e */	"SEX R0","SEX R1","SEX R2","SEX R3","SEX R4","SEX R5","SEX R6","SEX R7","SEX R8","SEX R9","SEX RA","SEX RB","SEX RC","SEX RD","SEX RE","SEX RF",
+/* f */	"LDX   ","OR    ","AND   ","XOR   ","ADD   ","SD    ","SHR   ","SM    ","LDI   ","ORI   ","ANI   ","XRI   ","ADI   ","SDI   ","SHL   ","SMI   "
+];
+		
+		var execN3 = [ // Short Branch
+			(()=>{R[P]=   M[R[P]]|R[P]&65280             }),
+			(()=>{R[P]= Q?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=!D?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=DF?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=E1?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=E2?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=E3?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=E4?M[R[P]]|R[P]&65280:++R[P]&65535}),
+			(()=>{R[P]=   ++R[P]&65535                   }),
+			(()=>{R[P]= Q?++R[P]&65535:M[R[P]]|R[P]&65280}),
+			(()=>{R[P]=!D?++R[P]&65535:M[R[P]]|R[P]&65280}),
+			(()=>{R[P]=DF?++R[P]&65535:M[R[P]]|R[P]&65280}),
+			(()=>{R[P]=E1?++R[P]&65535:M[R[P]]|R[P]&65280}),
+			(()=>{R[P]=E2?++R[P]&65535:M[R[P]]|R[P]&65280}),
+			(()=>{R[P]=E3?++R[P]&65535:M[R[P]]|R[P]&65280}),
+			(()=>{R[P]=E4?++R[P]&65535:M[R[P]]|R[P]&65280})]
+		
+		var execN6 = [ // Input / Output
+			(()=>{IOV[0]=M[R[X]++];R[X]&=65535;IOS[0]=0}),
+			(()=>{IOV[1]=M[R[X]++];R[X]&=65535;IOS[1]=0}),
+			(()=>{IOV[2]=M[R[X]++];R[X]&=65535;IOS[2]=0}),
+			(()=>{IOV[3]=M[R[X]++];R[X]&=65535;IOS[3]=0}),
+			(()=>{IOV[4]=M[R[X]++];R[X]&=65535;IOS[4]=0}),
+			(()=>{IOV[5]=M[R[X]++];R[X]&=65535;IOS[5]=0}),
+			(()=>{IOV[6]=M[R[X]++];R[X]&=65535;IOS[6]=0}),
+			(()=>{IOV[7]=M[R[X]++];R[X]&=65535;IOS[7]=0}),
+			(()=>{D=M[R[X]]=IOV[0];IOS[0]=1}),
+			(()=>{D=M[R[X]]=IOV[1];IOS[1]=1}),
+			(()=>{D=M[R[X]]=IOV[2];IOS[2]=1}),
+			(()=>{D=M[R[X]]=IOV[3];IOS[3]=1}),
+			(()=>{D=M[R[X]]=IOV[4];IOS[4]=1}),
+			(()=>{D=M[R[X]]=IOV[5];IOS[5]=1}),
+			(()=>{D=M[R[X]]=IOV[6];IOS[6]=1}),
+			(()=>{D=M[R[X]]=IOV[7];IOS[7]=1})]
+		
+		var execN7 = [ // Arithmetics through carry
+			(()=>{P=(X=M[R[X]++])&15;X>>=4;IE=1;R[X]&=65535}),
+			(()=>{P=(X=M[R[X]++])&15;X>>=4;IE=0;R[X]&=65535}),
+			(()=>{D=M[R[X]++];R[X]&=65535}),
+			(()=>{M[R[X]--]=D;R[X]&=65535}),
+			(()=>{DF=+((D+=M[R[X]]+DF)>255);D&=255}),
+			(()=>{DF=+((D=M[R[X]]+DF-D-1)>=0);D&=255}),
+			(()=>{DF=+((D+=DF*256)&1);D>>=1}),
+			(()=>{DF=+((D-=M[R[X]]+1-DF)>=0);D&=255}),
+			(()=>{M[R[X]]=T}),
+			(()=>{M[R[2]--]=T=X*16+P;X=P;R[2]&=65535}),
+			(()=>{f+=Q==1;Q=0}),
+			(()=>{f+=Q==0;Q=1}),
+			(()=>{DF=+((D+=M[R[P]++]+DF)>255);D&=255;R[P]&=65535}),
+			(()=>{DF=+((D=M[R[P]++]+DF-D-1)>=0);D&=255;R[P]&=65535}),
+			(()=>{DF=+((D+=D+DF)>255);D&=255}),
+			(()=>{DF=+((D-=M[R[P]++]+1-DF)>=0);D&=255;;R[P]&=65535})]
+			
+		var execNF = [ // Arithmetics through no carry
+			(()=>{D =M[R[X]]}),
+			(()=>{D|=M[R[X]]}),
+			(()=>{D&=M[R[X]]}),
+			(()=>{D^=M[R[X]]}),
+			(()=>{DF=+((D+=M[R[X]])>255);D&=255}),
+			(()=>{DF=+((D=M[R[X]]-D)>=0);D&=255}),
+			(()=>{DF=D&1;D>>=1}),
+			(()=>{DF=+((D-=M[R[X]])>=0);D&=255}),
+			(()=>{D =M[R[P]++];R[P]&=65535}),
+			(()=>{D|=M[R[P]++];R[P]&=65535}),
+			(()=>{D&=M[R[P]++];R[P]&=65535}),
+			(()=>{D^=M[R[P]++];R[P]&=65535}),
+			(()=>{DF=+((D+=M[R[P]++])>255);D&=255;R[P]&=65535}),
+			(()=>{DF=+((D=M[R[P]++]-D)>=0);D&=255;R[P]&=65535}),
+			(()=>{DF=+(D>127);D=(D+D)&255}),
+			(()=>{DF=+((D-=M[R[P]++])>=0);D&=255;R[P]&=65535})]
+		
+		var execNC = [ // Long Branch
+			(()=>{R[P]=   M[R[P]]*256+M[++R[P]&65535]               }),
+			(()=>{R[P]= Q?M[R[P]]*256+M[++R[P]&65535]:(2+R[P])&65535}),
+			(()=>{R[P]=!D?M[R[P]]*256+M[++R[P]&65535]:(2+R[P])&65535}),
+			(()=>{R[P]=DF?M[R[P]]*256+M[++R[P]&65535]:(2+R[P])&65535}),
+			(()=>{                                                  }),
+			(()=>{if( !Q){R[P]=(2+R[P])&65535}                      }),
+			(()=>{if(  D){R[P]=(2+R[P])&65535}                      }),
+			(()=>{if(!DF){R[P]=(2+R[P])&65535}                      }),
+			(()=>{R[P]=   (2+R[P])&65535                            }),
+			(()=>{R[P]= Q?(2+R[P])&65535:M[R[P]]*256+M[++R[P]&65535]}),
+			(()=>{R[P]=!D?(2+R[P])&65535:M[R[P]]*256+M[++R[P]&65535]}),
+			(()=>{R[P]=DF?(2+R[P])&65535:M[R[P]]*256+M[++R[P]&65535]}),
+			(()=>{if( IE){R[P]=(2+R[P])&65535}                      }),
+			(()=>{if(  Q){R[P]=(2+R[P])&65535}                      }),
+			(()=>{if( !D){R[P]=(2+R[P])&65535}                      }),
+			(()=>{if( DF){R[P]=(2+R[P])&65535}                      })]
+		
+		var execI = [  // Main execution
+			/*LDN*/(()=>{if(N){D=M[R[N]]}else{ID=1}}),
+			/*INC*/(()=>{R[N]++;R[N]&=65535}),
+			/*DEC*/(()=>{R[N]--;R[N]&=65535}),
+			/*SBN*/(()=>{execN3[N]()}),
+			/*LDA*/(()=>{D=M[R[N]++];R[N]&=65535}),
+			/*STR*/(()=>{M[R[N]]=D}),
+			/*ION*/(()=>{execN6[N]()}),
+			/*RTH*/(()=>{execN7[N]()}),
+			/*GLO*/(()=>{D=R[N]&255}),
+			/*GHI*/(()=>{D=R[N]>>8}),
+			/*PLO*/(()=>{R[N]=(R[N]&65280)+D}),
+			/*PHI*/(()=>{R[N]=(R[N]&255)+D*256}),
+			/*LBR*/(()=>{execNC[N]();q+=Q;C++}),
+			/*SEP*/(()=>{P=N}),
+			/*SEX*/(()=>{X=N}),
+			/*RTH*/(()=>{execNF[N]()})]
+
+		function steps(ak){ //RCA1802 CPU execution
+			if(ID){q+=Q*(ak-C);C=ak
+			}else{while(C<ak){if(ID){break}
+				if(!IOS[2])E3=+(keymap[IOV[2]&15]in K) //Keypress
+				I=(N=M[R[P]++])>>4;q+=Q;C++
+				//console.log(toHexPad(R[P]-1,4)+" "+toHexPad(N,2)+" "+ops[N])
+				R[P]&=65535;N&=15;
+				execI[I]();q+=Q;C++
+				}
+			}}
+
+		function toHexPad(k,l){return k.toString(16).toUpperCase().padStart(l,'0')}
+		function hexArray(k,l){var j=[];for(var i in k){
+			j.push(toHexPad(k[i],l))}
+		return j }
+		
+		function cycles(){ // One frame cycles
+			//Pctxg.fillStyle="#444444"+"22"
+			//Pctxg.fillRect(0,0,64,128)
+			f=q=E1=0;steps(nC+=1820) // CPU steps through display blanks
+			if(IOS[1]){E1=1;steps(nC+=30)  // 2 lines before interrupt
+				if(IE){T=X*16+P;X=2;P=1;ID=IE=0;q+=Q;C++} // Interrupt
+				steps(nC+=26);E1=0;
+				for(var py=0,pI=0,k=0;py<128;py++){
+					if(py==124){E1=1};steps(nC+=4);
+					for(var n,px=0;px<64;){
+						if((k=M[R[0]++])!=Cv[pI]){Cv[pI++]=k
+							n=k&128;Pctxg.fillStyle=n?col1:col0
+							k=(k+k)&255;for(m=1;k;k+=k,k&=255){
+								if(n!=(n=k&128)){
+									Pctxg.fillRect(px,py,m,1)
+									Pctxg.fillStyle=n?col1:col0
+								px+=m;m=1}else{m++}
+							}Pctxg.fillRect(px,py,m,1)
+							px+=m;if((m=px&7)!=0){
+								Pctxg.fillStyle=col0
+								Pctxg.fillRect(px,py,8-m,1)
+							px+=8-m}
+						}else{px+=8;pI++
+						}R[0]&=65535
+					}q+=Q*8;steps(nC+=2)
+				}
+			}else{steps(nC+=1848)}
+			
+			BGcnv.style.backgroundColor=
+			Qdisp.style.backgroundColor=
+			"#"+toHexPad(mtF(q*256/3668),2)
+			+toHexPad(mtF(q*136/3668),2)+"00"
+			
+			g.gain.value=q/3668
+			if(f>1){o.frequency.value=f*30
+			}else{o.frequency.value=220}
+			
+			document.getElementById("pcn").innerHTML=
+			"Cycs: "+C+
+			"<br><br>Regs: "+hexArray(R,4)+
+			"<br>DF,D: "+[toHexPad(DF,1),toHexPad(D,2)]+
+			"<br>X,P : "+hexArray([X,P],1)+
+			"<br><br>EFN : "+toHexPad([E1,E2,E3,E4],1)+
+			"<br><br>"+JSON.stringify(K)
+		}
+			
+		var cprogram=atob(
+			"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")
+			
+		var csviprom=atob(
+			"+ICy+Aii4tJkAGIM+P+h+A+x+KpRAfuqMiKR/wQ7IrEwEjYokKDg0OH4AHOB+686KfjSc/ifUYGg"+
+			"kbD4z6HQcyAgQP8BIFD7gjo+krP4UaPTkLK7vfiBsbS1t7q8+Eah+K+i+N2k+Mal+Lqn+KGs4mnc"+
+			"19fXttfX16bU3L4y9PsKMu/criJhnvsLMsKe+w86j/hvrPhAuZP23CmZOpf4EKf4CKlGt5P+3IY6"+
+			"rS6X9rfcKYk6rReH9tyOOp7caSbUMMD4g6z4CrncM8UpmTrI3DvP+Ampp5d2tynciTrWh/Yz43uX"+
+			"VhaGOs8ujjrPML3cFtQw79fX11bUFjD0AAAAADA5Iio+ICQ0JiguGBQcEBLwgPCA8ICAgPBQcFDw"+
+			"UFBQ8IDwEPCA8JDwkPAQ8BDwkPCQkJDwEBAQEGAgICBwoKDwICB6QnAieCJSxBn4AKCbsOLigOLi"+
+			"IKDiIKDiIKA8U5gyZ6sri7iIMkN7KDBE0/gKO3b4IBd7v/8BOng5bnqfMHjT+BA9hT2P/wE6hxec"+
+			"/jWQMILT4pyvLyKPUmLi4j6Y+ASoiDqk+ASoNqeIMaqP+g9SMJQAAAAA09z+/v7+rtyO8TC51KoK"+
+			"qvgFr0pdjfwIrS+POsyN/NmtMMXTIgZzhnOWUvgGrvjYrQL29vb21UL6D9WO9q4y3DvqHR0w6gE=")
+			
+		var chip8ram=atob(
+			"kbv/AbK2+M+i+IGx+EahkLT4G6T4AbX4/KXUlrfilLxFr/b29vYyRPlQrI/6D/nwpgX29vb2+fCn"+
+			"TLOM/A+sDKPTMBuP+g+zRTBAImkS1AAAAQEBAQEBAQEBAQEBAAEBAHx1g4uVtLe8keuk2XCZBQb6"+
+			"B74G+j/29vYiUgf6H/7+/vGsm7xF+g+tp/jQppOvhzLzJ0q9nq6OMqSd9r2Pdq8uMJidVhaPVhYw"+
+			"jgDs+NCmk6eNMtkG8i0yvvgBp0bzXAL7BzLSHAbyMs74AacG81wsFoz8CKw7s/j/podWEtSbv/j/"+
+			"r5NfjzLfLzDlAEK1QqXUjaeHMqwqJzD1AAAAAAAAAAAARaOYVtT4gbz4lawi3BJW1Aa41Aao1GQK"+
+			"AeaK9Ko7KJr8AbrU+IG6BvoPqgqq1OYGv5O++BuuKhr4AFoO9TtLVgr8AVowQE72OzyfVioq1AAi"+
+			"hlL48KcHWofzFxo6WxLUIoZS+PCnCleH8xcaOmsS1BWFInOVUiVFpYb6D7XURebzOoIVFdRF5vM6"+
+			"iNRFBzCMRQcwhOZiJkWjNojUPojU+PCn50X0pYb6Dzuy/AG11EVW1EXm9FbURfoPOsQHVtSvIvjT"+
+			"c4/58FLmB9JW+P+m+AB+VtQZia6Tvpnu9FZ25vS5VkXyVtRFqob6D7rUAAAAAAAAAAAAAADgAEs=")
+	
+	</script>
+	<script name="rAF">
+	//	https://gist.github.com/addyosmani/5434533
+		window.requestAnimationFrame = function() {
+			return window.requestAnimationFrame ||
+				window.webkitRequestAnimationFrame ||
+				window.mozRequestAnimationFrame ||
+				window.msRequestAnimationFrame ||
+				window.oRequestAnimationFrame ||
+				function(f) {
+					window.setTimeout(f,1000/60);
+				}
+		}();
+		var limitLoop = function (fn, fps) {
+			var then = new Date().getTime();
+			var interval = 1000 / fps;
+			return (function loop(time){
+				Mloop = requestAnimationFrame(loop);
+				var now = new Date().getTime();
+				var delta = now - then;
+				if (delta => interval) {
+					var skip=Math.min(4,
+						Math.floor(delta/interval))
+					then = now - (delta % interval)
+					for(var i=0;i<skip;i++)fn(frames)
+				}
+			}(0));
+		};
+	</script>
+	<script name="Events">
+		var keymap = [88,49,50,51,81,87,69,65,83,68,90,67,52,82,70,86];
+		var Mloop  = false
+		function reset() {
+			var a = document.getElementById("reset")
+			if(Mloop){
+				window.cancelAnimationFrame(Mloop)
+				Pctxg.clearRect(0,0,64,128);
+				Cv = new Uint8Array(0x400)
+				a.innerHTML = "Start Emulation"
+				Mloop=false
+				ID = 0
+				Q  = 0
+				IE = 1
+				X  = 0
+				P  = 0
+				nC = C = 12
+				D=8; X=P=2;
+				R[0]= 0x0000
+				R[P]= 0x8008
+				g.gain.value=0
+				IOV = new Uint8Array(0x8)
+				IOS = new Uint8Array(0x8)
+				if (g) {
+					g.disconnect();
+					g = null;
+				}
+			}else{
+				context = new AudioContext()
+				o = context.createOscillator()
+				g = context.createGain()
+				o.type = "square"; o.connect(g)
+				g.connect(context.destination)
+				g.gain.value = 0; o.start(0)
+				Mloop = limitLoop(cycles,60)
+				a.innerHTML = "Stop Emulation"
+			}
+		}
+		
+		function pressload() {
+		document.getElementById("inputfile").click() }
+		
+		function load() {
+			if(Mloop)reset()
+			var start = parseInt("0x"+
+			document.getElementById("loadaddr").value)
+			var file = document.getElementById("inputfile").files[0];
+			var reader = new FileReader();
+		
+			function actuallyLoad() {
+				var buff = reader.result;
+				var bytes = new Uint8Array(buff);
+				for(z=0,l=bytes.length;z<l;z++)
+					M[start+z]=bytes[z]
+			}
+		
+			reader.onload = actuallyLoad;
+			reader.readAsArrayBuffer(file);
+		}
+		
+		function keyDown(event){if (!(event.keyCode in K)){K[event.keyCode]=true}}
+		function keyUp(event){if(event.keyCode in K){delete K[event.keyCode]}
+		if (event.keyCode ==  13) { reset() }}
+		
+		function inputcheck(){for(var k=0;k<1;k++){
+			for(var i=j=0;i<control[k].value.length;i++){
+			if(isNaN(parseInt("0x"+control[k].value[i]))){j=1;break}}
+			if(j){control[k].value=addrval[k]}else{addrval[k]=control[k].value}
+			if(K==1){if(!Mloop){R[0]=parseInt("0x"+control[k].value)}}
+			}
+		}
+	</script>
+	<script name="Main">
+		Pcanv=document.getElementById("target")
+		BGcnv=document.getElementsByClassName("beep")[0]
+		Qdisp=document.getElementsByClassName("beep")[1]
+		Pctxg=Pcanv.getContext("2d")
+		col1="#FFFFFF";col0="#000000"
+		mt=Math;mtF=mt.floor;mtR=mt.random
+		for(i=0,l=M.length;i<l;i++)M[i]=Math.floor(mtR()*256)
+		for(i=0,l=chip8ram.length;i<l;i++)M[i+0x0000]=chip8ram.charCodeAt(i)
+		for(i=0,l=cprogram.length;i<l;i++)M[i+0x0200]=cprogram.charCodeAt(i)
+		for(i=0,l=csviprom.length;i<l;i++)M[i+0x8000]=csviprom.charCodeAt(i)
+		M[0x00AC]=0xE2; // CHIP-8 no vblank screendraw
+		M[0x8010]=0x7F; // 32KB VIP screen refresh RAM
+		var control=[],addrval=[]
+		window.addEventListener("keydown", keyDown, false);
+		window.addEventListener("keyup"  , keyUp  , false);
+		control[0] = document.getElementById('loadaddr')
+		addrval[0] = control[0].value;
+		var context,o,g,q,Mloop=false;
+	</script>
+</html>
